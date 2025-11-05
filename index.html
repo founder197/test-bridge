@@ -1,102 +1,148 @@
-<script>
-  const nativeTokens = {
-    1: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
-    137: "0x0000000000000000000000000000000000001010",
-    56: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
-    42161: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
-  };
-
-  let provider, signer, userAddress, currentQuote;
-
-  const output = document.getElementById("output");
-  const btnGetQuote = document.getElementById("getQuote");
-  const btnExec = document.getElementById("executeBridge");
-
-  const log = (msg) => (output.textContent = msg);
-
-  document.getElementById("connectWallet").addEventListener("click", async () => {
-    if (!window.ethereum) return alert("No injected wallet found!");
-    provider = new ethers.providers.Web3Provider(window.ethereum, "any");
-    await provider.send("eth_requestAccounts", []);
-    signer = provider.getSigner();
-    userAddress = await signer.getAddress();
-    const network = await provider.getNetwork();
-    document.getElementById("walletInfo").textContent =
-      `Connected: ${userAddress.slice(0,6)}... (${network.name})`;
-    document.getElementById("connectWallet").textContent = "✅ Wallet Connected";
-  });
-
-  btnGetQuote.addEventListener("click", async () => {
-    const fromChain = document.getElementById("fromChain").value;
-    const toChain = document.getElementById("toChain").value;
-    const amountEth = document.getElementById("amount").value;
-    if (!amountEth) return alert("Enter amount");
-    if (!userAddress) return alert("Connect wallet first");
-
-    const fromToken = nativeTokens[fromChain];
-    const toToken = nativeTokens[toChain];
-    const fromAmount = (Number(amountEth) * 1e18).toString();
-
-    const url = `/api/quote?fromChain=${fromChain}&toChain=${toChain}&fromToken=${fromToken}&toToken=${toToken}&fromAddress=${userAddress}&toAddress=${userAddress}&fromAmount=${fromAmount}`;
-
-    log("🔍 Fetching quote...");
-    btnGetQuote.disabled = true;
-    const res = await fetch(url);
-    const data = await res.json();
-    btnGetQuote.disabled = false;
-
-    if (!data?.estimate) {
-      log("❌ No route found.");
-      btnExec.disabled = true;
-      return;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Mini Bridge - LI.FI API</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #0f172a;
+      color: #f1f5f9;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 30px;
     }
+    input, button {
+      margin: 8px;
+      padding: 10px;
+      border-radius: 8px;
+      border: none;
+    }
+    button {
+      background: #3b82f6;
+      color: white;
+      cursor: pointer;
+    }
+    button:disabled {
+      background: #475569;
+      cursor: not-allowed;
+    }
+    pre {
+      background: #1e293b;
+      padding: 15px;
+      border-radius: 8px;
+      width: 400px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <h2>🌉 Mini Bridge (LI.FI API)</h2>
 
-    currentQuote = data;
-    const est = data.estimate;
-    const result = {
-      bridge: est.tool,
-      fromAmount: amountEth,
-      toAmount: (est.toAmount / 1e18).toFixed(6),
-      fromChain,
-      toChain,
-      duration: est.executionDuration + " sec",
-    };
+  <button id="connectWallet">🔗 Connect Wallet</button>
+  <p id="walletInfo">Not connected</p>
 
-    log(`✅ Route found!\n\nBridge: ${result.bridge}\nFrom → To: ${result.fromChain} → ${result.toChain}\nAmount: ${result.fromAmount} → ${result.toAmount}\nEstimated time: ${result.duration}`);
+  <input id="amount" type="number" step="0.1" placeholder="Amount in USDC" />
 
-    btnExec.disabled = false;
-    btnExec.textContent = `🚀 Execute via ${result.bridge}`;
-  });
+  <button id="getQuote">🔍 Get Bridge Quote</button>
+  <button id="executeBridge" disabled>🚀 Execute Bridge</button>
 
-  btnExec.addEventListener("click", async () => {
-    if (!currentQuote) return alert("No quote yet!");
-    btnExec.disabled = true;
-    log("⚙️ Preparing transaction...");
+  <pre id="output">Waiting for action...</pre>
 
-    const res = await fetch("/api/transaction", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(currentQuote)
+  <script>
+    let provider, signer, userAddress, currentQuote;
+
+    const output = document.getElementById("output");
+    const btnGetQuote = document.getElementById("getQuote");
+    const btnExec = document.getElementById("executeBridge");
+
+    const log = (msg) => (output.textContent = msg);
+
+    document.getElementById("connectWallet").addEventListener("click", async () => {
+      if (!window.ethereum) return alert("No injected wallet found!");
+      provider = new ethers.providers.Web3Provider(window.ethereum, "any");
+      await provider.send("eth_requestAccounts", []);
+      signer = provider.getSigner();
+      userAddress = await signer.getAddress();
+      const network = await provider.getNetwork();
+      document.getElementById("walletInfo").textContent =
+        `Connected: ${userAddress.slice(0,6)}... (${network.name})`;
+      document.getElementById("connectWallet").textContent = "✅ Wallet Connected";
     });
-    const txData = await res.json();
 
-    if (!txData.transactionRequest) {
-      log("❌ No transaction data.");
+    btnGetQuote.addEventListener("click", async () => {
+      const amount = document.getElementById("amount").value;
+      if (!amount) return alert("Enter amount");
+      if (!userAddress) return alert("Connect wallet first");
+
+      // USDC Polygon -> USDC Arbitrum
+      const fromChain = 137;
+      const toChain = 42161;
+      const fromToken = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+      const toToken = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
+      const fromAmount = (Number(amount) * 1e6).toString(); // USDC = 6 decimais
+
+      const url = `/api/quote?fromChain=${fromChain}&toChain=${toChain}&fromToken=${fromToken}&toToken=${toToken}&fromAddress=${userAddress}&toAddress=${userAddress}&fromAmount=${fromAmount}`;
+
+      log("🔍 Fetching quote...");
+      btnGetQuote.disabled = true;
+      const res = await fetch(url);
+      const data = await res.json();
+      btnGetQuote.disabled = false;
+
+      if (!data?.estimate) {
+        log("❌ No route found.");
+        btnExec.disabled = true;
+        return;
+      }
+
+      currentQuote = data;
+      const est = data.estimate;
+      const result = {
+        bridge: est.tool,
+        fromAmount: amount,
+        toAmount: (est.toAmount / 1e6).toFixed(6),
+        duration: est.executionDuration + " sec",
+      };
+
+      log(`✅ Route found!\nBridge: ${result.bridge}\nAmount: ${result.fromAmount} → ${result.toAmount} USDC\nEstimated time: ${result.duration}`);
       btnExec.disabled = false;
-      return;
-    }
-
-    const tx = txData.transactionRequest;
-    const txResponse = await signer.sendTransaction({
-      to: tx.to,
-      data: tx.data,
-      value: tx.value ? ethers.BigNumber.from(tx.value) : 0
+      btnExec.textContent = `🚀 Execute via ${result.bridge}`;
     });
 
-    log(`📤 Transaction sent!\nHash: ${txResponse.hash}\n⏳ Waiting confirmation...`);
-    await txResponse.wait();
+    btnExec.addEventListener("click", async () => {
+      if (!currentQuote) return alert("No quote yet!");
+      btnExec.disabled = true;
+      log("⚙️ Preparing transaction...");
 
-    log(`✅ Bridge completed!\nHash: ${txResponse.hash}`);
-    btnExec.textContent = "✅ Bridge Done";
-  });
-</script>
+      const res = await fetch("/api/transaction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(currentQuote)
+      });
+      const txData = await res.json();
+      console.log("TX Debug:", txData);
+
+      if (!txData.transactionRequest) {
+        log("❌ No transaction data returned. Check console for details.");
+        btnExec.disabled = false;
+        return;
+      }
+
+      const tx = txData.transactionRequest;
+      const txResponse = await signer.sendTransaction({
+        to: tx.to,
+        data: tx.data,
+        value: tx.value ? ethers.BigNumber.from(tx.value) : 0
+      });
+
+      log(`📤 Transaction sent!\nHash: ${txResponse.hash}\n⏳ Waiting confirmation...`);
+      await txResponse.wait();
+      log(`✅ Bridge completed!\nHash: ${txResponse.hash}`);
+      btnExec.textContent = "✅ Bridge Done";
+    });
+  </script>
+</body>
+</html>
