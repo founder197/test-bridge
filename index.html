@@ -1,205 +1,102 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Simple LI.FI Bridge</title>
-  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #0d1117;
-      color: #e6edf3;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 40px;
-    }
-    h1 { color: #58a6ff; }
-    .box {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 10px;
-      padding: 20px;
-      width: 340px;
-      margin-top: 20px;
-    }
-    label { display: block; margin-top: 10px; }
-    select, input {
-      width: 100%;
-      padding: 8px;
-      border-radius: 6px;
-      border: 1px solid #30363d;
-      background: #0d1117;
-      color: #e6edf3;
-      margin-top: 5px;
-    }
-    button {
-      margin-top: 15px;
-      padding: 10px;
-      background: #238636;
-      border: none;
-      color: white;
-      width: 100%;
-      border-radius: 6px;
-      cursor: pointer;
-      font-weight: bold;
-    }
-    button:disabled {
-      background: #444c56;
-      cursor: not-allowed;
-    }
-    pre {
-      background: #0d1117;
-      border: 1px solid #30363d;
-      padding: 10px;
-      border-radius: 6px;
-      overflow-x: auto;
-      margin-top: 15px;
-      font-size: 13px;
-    }
-    #walletInfo {
-      text-align: center;
-      font-size: 0.9rem;
-      color: #8b949e;
-      margin-top: 5px;
-    }
-  </style>
-</head>
-<body>
-  <h1>🌉 Simple LI.FI Bridge</h1>
-  <div class="box">
-    <button id="connectWallet">🔗 Connect Wallet</button>
-    <div id="walletInfo">No wallet connected</div>
+<script>
+  const nativeTokens = {
+    1: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+    137: "0x0000000000000000000000000000000000001010",
+    56: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+    42161: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
+  };
 
-    <label>From Chain</label>
-    <select id="fromChain">
-      <option value="1">Ethereum</option>
-      <option value="137">Polygon</option>
-      <option value="56">BSC</option>
-      <option value="42161">Arbitrum</option>
-    </select>
+  let provider, signer, userAddress, currentQuote;
 
-    <label>To Chain</label>
-    <select id="toChain">
-      <option value="137">Polygon</option>
-      <option value="1">Ethereum</option>
-      <option value="56">BSC</option>
-      <option value="42161">Arbitrum</option>
-    </select>
+  const output = document.getElementById("output");
+  const btnGetQuote = document.getElementById("getQuote");
+  const btnExec = document.getElementById("executeBridge");
 
-    <label>Amount (native token)</label>
-    <input type="number" id="amount" placeholder="Ex: 0.05" step="0.01" />
+  const log = (msg) => (output.textContent = msg);
 
-    <button id="getQuote">Get Bridge Quote</button>
-    <button id="executeBridge" disabled>Execute Bridge</button>
+  document.getElementById("connectWallet").addEventListener("click", async () => {
+    if (!window.ethereum) return alert("No injected wallet found!");
+    provider = new ethers.providers.Web3Provider(window.ethereum, "any");
+    await provider.send("eth_requestAccounts", []);
+    signer = provider.getSigner();
+    userAddress = await signer.getAddress();
+    const network = await provider.getNetwork();
+    document.getElementById("walletInfo").textContent =
+      `Connected: ${userAddress.slice(0,6)}... (${network.name})`;
+    document.getElementById("connectWallet").textContent = "✅ Wallet Connected";
+  });
 
-    <pre id="output">Waiting...</pre>
-  </div>
+  btnGetQuote.addEventListener("click", async () => {
+    const fromChain = document.getElementById("fromChain").value;
+    const toChain = document.getElementById("toChain").value;
+    const amountEth = document.getElementById("amount").value;
+    if (!amountEth) return alert("Enter amount");
+    if (!userAddress) return alert("Connect wallet first");
 
-  <script>
-    const nativeTokens = {
-      1: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", // ETH
-      137: "0x0000000000000000000000000000000000001010", // MATIC
-      56: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", // BNB placeholder
-      42161: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" // Arbitrum ETH
+    const fromToken = nativeTokens[fromChain];
+    const toToken = nativeTokens[toChain];
+    const fromAmount = (Number(amountEth) * 1e18).toString();
+
+    const url = `/api/quote?fromChain=${fromChain}&toChain=${toChain}&fromToken=${fromToken}&toToken=${toToken}&fromAddress=${userAddress}&toAddress=${userAddress}&fromAmount=${fromAmount}`;
+
+    log("🔍 Fetching quote...");
+    btnGetQuote.disabled = true;
+    const res = await fetch(url);
+    const data = await res.json();
+    btnGetQuote.disabled = false;
+
+    if (!data?.estimate) {
+      log("❌ No route found.");
+      btnExec.disabled = true;
+      return;
+    }
+
+    currentQuote = data;
+    const est = data.estimate;
+    const result = {
+      bridge: est.tool,
+      fromAmount: amountEth,
+      toAmount: (est.toAmount / 1e18).toFixed(6),
+      fromChain,
+      toChain,
+      duration: est.executionDuration + " sec",
     };
 
-    let provider, signer, userAddress, currentQuote;
+    log(`✅ Route found!\n\nBridge: ${result.bridge}\nFrom → To: ${result.fromChain} → ${result.toChain}\nAmount: ${result.fromAmount} → ${result.toAmount}\nEstimated time: ${result.duration}`);
 
-    // ==== CONNECT VIA INJECTED WALLET ====
-    document.getElementById("connectWallet").addEventListener("click", async () => {
-      try {
-        if (typeof window.ethereum === "undefined") {
-          alert("⚠️ No injected wallet detected.\nPlease install MetaMask, Rabby, or another Web3 wallet.");
-          return;
-        }
+    btnExec.disabled = false;
+    btnExec.textContent = `🚀 Execute via ${result.bridge}`;
+  });
 
-        provider = new ethers.providers.Web3Provider(window.ethereum, "any");
-        await provider.send("eth_requestAccounts", []);
-        signer = provider.getSigner();
-        userAddress = await signer.getAddress();
+  btnExec.addEventListener("click", async () => {
+    if (!currentQuote) return alert("No quote yet!");
+    btnExec.disabled = true;
+    log("⚙️ Preparing transaction...");
 
-        const network = await provider.getNetwork();
-        document.getElementById("walletInfo").textContent =
-          `Connected: ${userAddress.slice(0,6)}... on ${network.name}`;
-        document.getElementById("connectWallet").textContent = "✅ Wallet Connected";
+    const res = await fetch("/api/transaction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(currentQuote)
+    });
+    const txData = await res.json();
 
-      } catch (err) {
-        alert("Connection failed: " + err.message);
-      }
+    if (!txData.transactionRequest) {
+      log("❌ No transaction data.");
+      btnExec.disabled = false;
+      return;
+    }
+
+    const tx = txData.transactionRequest;
+    const txResponse = await signer.sendTransaction({
+      to: tx.to,
+      data: tx.data,
+      value: tx.value ? ethers.BigNumber.from(tx.value) : 0
     });
 
-    // ==== GET QUOTE ====
-    document.getElementById("getQuote").addEventListener("click", async () => {
-      const fromChain = document.getElementById("fromChain").value;
-      const toChain = document.getElementById("toChain").value;
-      const amountEth = document.getElementById("amount").value;
-      if (!amountEth) return alert("Please enter an amount");
-      if (!userAddress) return alert("Please connect a wallet first.");
+    log(`📤 Transaction sent!\nHash: ${txResponse.hash}\n⏳ Waiting confirmation...`);
+    await txResponse.wait();
 
-      const fromToken = nativeTokens[fromChain];
-      const toToken = nativeTokens[toChain];
-      const fromAmount = (Number(amountEth) * 1e18).toString();
-
-      const url = `https://li.quest/v1/quote?fromChain=${fromChain}&toChain=${toChain}&fromToken=${fromToken}&toToken=${toToken}&fromAddress=${userAddress}&toAddress=${userAddress}&fromAmount=${fromAmount}`;
-
-      try {
-        document.getElementById("output").textContent = "Fetching quote...";
-        const res = await fetch(url);
-        const data = await res.json();
-        if (data && data.estimate) {
-          currentQuote = data;
-          const result = {
-            tool: data.tool,
-            bridge: data.estimate.tool,
-            toAmount: (data.estimate.toAmount / 1e18).toFixed(6),
-            time: data.estimate.executionDuration + " sec"
-          };
-          document.getElementById("output").textContent = JSON.stringify(result, null, 2);
-          document.getElementById("executeBridge").disabled = false;
-        } else {
-          document.getElementById("output").textContent = "No quote found for this route.";
-        }
-      } catch (err) {
-        document.getElementById("output").textContent = "Error: " + err.message;
-      }
-    });
-
-    // ==== EXECUTE BRIDGE ====
-    document.getElementById("executeBridge").addEventListener("click", async () => {
-      if (!currentQuote) return alert("Get a quote first.");
-      const txUrl = "https://li.quest/v1/transaction";
-
-      try {
-        document.getElementById("output").textContent = "Building transaction...";
-        const res = await fetch(txUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(currentQuote)
-        });
-        const txData = await res.json();
-
-        if (!txData.transactionRequest) {
-          document.getElementById("output").textContent = "No transaction data returned.";
-          return;
-        }
-
-        const tx = txData.transactionRequest;
-        document.getElementById("output").textContent = "Sending transaction...";
-        const txResponse = await signer.sendTransaction({
-          to: tx.to,
-          data: tx.data,
-          value: tx.value ? ethers.BigNumber.from(tx.value) : 0
-        });
-
-        document.getElementById("output").textContent = "⏳ Tx sent! Waiting for confirmation...\n" + txResponse.hash;
-        await txResponse.wait();
-        document.getElementById("output").textContent = "✅ Bridge transaction confirmed!\nHash: " + txResponse.hash;
-      } catch (err) {
-        document.getElementById("output").textContent = "Error: " + err.message;
-      }
-    });
-  </script>
-</body>
-</html>
+    log(`✅ Bridge completed!\nHash: ${txResponse.hash}`);
+    btnExec.textContent = "✅ Bridge Done";
+  });
+</script>
