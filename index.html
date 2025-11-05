@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Simple LI.FI Bridge</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -20,7 +21,7 @@
       border: 1px solid #30363d;
       border-radius: 10px;
       padding: 20px;
-      width: 320px;
+      width: 340px;
       margin-top: 20px;
     }
     label { display: block; margin-top: 10px; }
@@ -44,6 +45,10 @@
       cursor: pointer;
       font-weight: bold;
     }
+    button:disabled {
+      background: #444c56;
+      cursor: not-allowed;
+    }
     pre {
       background: #0d1117;
       border: 1px solid #30363d;
@@ -58,6 +63,8 @@
 <body>
   <h1>🌉 Simple LI.FI Bridge</h1>
   <div class="box">
+    <button id="connectWallet">🔗 Connect Wallet</button>
+
     <label>From Chain</label>
     <select id="fromChain">
       <option value="1">Ethereum</option>
@@ -75,56 +82,99 @@
     </select>
 
     <label>Amount (native token)</label>
-    <input type="number" id="amount" placeholder="Ex: 0.1" step="0.01" />
+    <input type="number" id="amount" placeholder="Ex: 0.05" step="0.01" />
 
     <button id="getQuote">Get Bridge Quote</button>
+    <button id="executeBridge" disabled>Execute Bridge</button>
 
     <pre id="output">Waiting...</pre>
   </div>
 
   <script>
     const nativeTokens = {
-      1:  "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", // ETH
-      137:"0x0000000000000000000000000000000000001010", // MATIC (Polygon)
-      56: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", // BNB uses same placeholder
-      42161:"0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" // Arbitrum ETH
+      1: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", // ETH
+      137: "0x0000000000000000000000000000000000001010", // MATIC
+      56: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", // BNB placeholder
+      42161: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" // Arbitrum ETH
     };
 
+    let provider, signer, userAddress, currentQuote;
+
+    // === CONNECT WALLET ===
+    document.getElementById("connectWallet").addEventListener("click", async () => {
+      if (!window.ethereum) return alert("Please install MetaMask.");
+      provider = new ethers.providers.Web3Provider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      signer = provider.getSigner();
+      userAddress = await signer.getAddress();
+      document.getElementById("connectWallet").textContent = "✅ Connected: " + userAddress.slice(0,6) + "...";
+    });
+
+    // === GET QUOTE ===
     document.getElementById("getQuote").addEventListener("click", async () => {
       const fromChain = document.getElementById("fromChain").value;
       const toChain = document.getElementById("toChain").value;
       const amountEth = document.getElementById("amount").value;
-
-      if (!amountEth) {
-        alert("Please enter an amount");
-        return;
-      }
+      if (!amountEth) return alert("Please enter an amount");
 
       const fromToken = nativeTokens[fromChain];
       const toToken = nativeTokens[toChain];
       const fromAmount = (Number(amountEth) * 1e18).toString();
 
-      const url = `https://li.quest/v1/quote?fromChain=${fromChain}&toChain=${toChain}&fromToken=${fromToken}&toToken=${toToken}&fromAmount=${fromAmount}`;
+      const url = `https://li.quest/v1/quote?fromChain=${fromChain}&toChain=${toChain}&fromToken=${fromToken}&toToken=${toToken}&fromAddress=${userAddress}&toAddress=${userAddress}&fromAmount=${fromAmount}`;
 
       try {
         document.getElementById("output").textContent = "Fetching quote...";
         const res = await fetch(url);
         const data = await res.json();
-
         if (data && data.estimate) {
+          currentQuote = data;
           const result = {
             tool: data.tool,
             bridge: data.estimate.tool,
-            estimatedGas: data.estimate.gasCosts?.[0]?.estimate || "N/A",
             toAmount: (data.estimate.toAmount / 1e18).toFixed(6),
             time: data.estimate.executionDuration + " sec"
           };
           document.getElementById("output").textContent = JSON.stringify(result, null, 2);
-        } else if (data.message) {
-          document.getElementById("output").textContent = "Error: " + data.message;
+          document.getElementById("executeBridge").disabled = false;
         } else {
           document.getElementById("output").textContent = "No quote found for this route.";
         }
+      } catch (err) {
+        document.getElementById("output").textContent = "Error: " + err.message;
+      }
+    });
+
+    // === EXECUTE BRIDGE ===
+    document.getElementById("executeBridge").addEventListener("click", async () => {
+      if (!currentQuote) return alert("Get a quote first.");
+      const txUrl = "https://li.quest/v1/transaction";
+
+      try {
+        document.getElementById("output").textContent = "Building transaction...";
+        const res = await fetch(txUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(currentQuote)
+        });
+        const txData = await res.json();
+
+        if (!txData.transactionRequest) {
+          document.getElementById("output").textContent = "No transaction data returned.";
+          return;
+        }
+
+        const tx = txData.transactionRequest;
+        document.getElementById("output").textContent = "Sending transaction...";
+        const txResponse = await signer.sendTransaction({
+          to: tx.to,
+          data: tx.data,
+          value: tx.value ? ethers.BigNumber.from(tx.value) : 0
+        });
+
+        document.getElementById("output").textContent = "⏳ Tx sent! Waiting for confirmation...\n" + txResponse.hash;
+        await txResponse.wait();
+        document.getElementById("output").textContent = "✅ Bridge transaction confirmed!\nHash: " + txResponse.hash;
       } catch (err) {
         document.getElementById("output").textContent = "Error: " + err.message;
       }
