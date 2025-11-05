@@ -1,11 +1,10 @@
-// /api/transaction.js
 export default async function handler(req, res) {
   try {
     const response = await fetch("https://li.quest/v1/transaction", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-lifi-api-key": process.env.CLIENT_KEY || "",
+        "x-lifi-api-key": process.env.LIFI_API_KEY || "",
       },
       body: JSON.stringify(req.body),
     });
