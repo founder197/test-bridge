@@ -58,12 +58,19 @@
       margin-top: 15px;
       font-size: 13px;
     }
+    #walletInfo {
+      text-align: center;
+      font-size: 0.9rem;
+      color: #8b949e;
+      margin-top: 5px;
+    }
   </style>
 </head>
 <body>
   <h1>🌉 Simple LI.FI Bridge</h1>
   <div class="box">
     <button id="connectWallet">🔗 Connect Wallet</button>
+    <div id="walletInfo">No wallet connected</div>
 
     <label>From Chain</label>
     <select id="fromChain">
@@ -100,22 +107,36 @@
 
     let provider, signer, userAddress, currentQuote;
 
-    // === CONNECT WALLET ===
+    // ==== CONNECT VIA INJECTED WALLET ====
     document.getElementById("connectWallet").addEventListener("click", async () => {
-      if (!window.ethereum) return alert("Please install MetaMask.");
-      provider = new ethers.providers.Web3Provider(window.ethereum);
-      await provider.send("eth_requestAccounts", []);
-      signer = provider.getSigner();
-      userAddress = await signer.getAddress();
-      document.getElementById("connectWallet").textContent = "✅ Connected: " + userAddress.slice(0,6) + "...";
+      try {
+        if (typeof window.ethereum === "undefined") {
+          alert("⚠️ No injected wallet detected.\nPlease install MetaMask, Rabby, or another Web3 wallet.");
+          return;
+        }
+
+        provider = new ethers.providers.Web3Provider(window.ethereum, "any");
+        await provider.send("eth_requestAccounts", []);
+        signer = provider.getSigner();
+        userAddress = await signer.getAddress();
+
+        const network = await provider.getNetwork();
+        document.getElementById("walletInfo").textContent =
+          `Connected: ${userAddress.slice(0,6)}... on ${network.name}`;
+        document.getElementById("connectWallet").textContent = "✅ Wallet Connected";
+
+      } catch (err) {
+        alert("Connection failed: " + err.message);
+      }
     });
 
-    // === GET QUOTE ===
+    // ==== GET QUOTE ====
     document.getElementById("getQuote").addEventListener("click", async () => {
       const fromChain = document.getElementById("fromChain").value;
       const toChain = document.getElementById("toChain").value;
       const amountEth = document.getElementById("amount").value;
       if (!amountEth) return alert("Please enter an amount");
+      if (!userAddress) return alert("Please connect a wallet first.");
 
       const fromToken = nativeTokens[fromChain];
       const toToken = nativeTokens[toChain];
@@ -145,7 +166,7 @@
       }
     });
 
-    // === EXECUTE BRIDGE ===
+    // ==== EXECUTE BRIDGE ====
     document.getElementById("executeBridge").addEventListener("click", async () => {
       if (!currentQuote) return alert("Get a quote first.");
       const txUrl = "https://li.quest/v1/transaction";
