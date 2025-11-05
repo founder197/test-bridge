@@ -74,7 +74,7 @@
       <option value="42161">Arbitrum</option>
     </select>
 
-    <label>Amount (in ETH)</label>
+    <label>Amount (native token)</label>
     <input type="number" id="amount" placeholder="Ex: 0.1" step="0.01" />
 
     <button id="getQuote">Get Bridge Quote</button>
@@ -83,8 +83,12 @@
   </div>
 
   <script>
-    const ETH = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"; // Native token
-    const MATIC = "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270";
+    const nativeTokens = {
+      1:  "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", // ETH
+      137:"0x0000000000000000000000000000000000001010", // MATIC (Polygon)
+      56: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", // BNB uses same placeholder
+      42161:"0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" // Arbitrum ETH
+    };
 
     document.getElementById("getQuote").addEventListener("click", async () => {
       const fromChain = document.getElementById("fromChain").value;
@@ -96,9 +100,11 @@
         return;
       }
 
-      const fromAmount = (Number(amountEth) * 1e18).toString(); // convert to wei
+      const fromToken = nativeTokens[fromChain];
+      const toToken = nativeTokens[toChain];
+      const fromAmount = (Number(amountEth) * 1e18).toString();
 
-      const url = `https://li.quest/v1/quote?fromChain=${fromChain}&toChain=${toChain}&fromToken=${ETH}&toToken=${MATIC}&fromAmount=${fromAmount}`;
+      const url = `https://li.quest/v1/quote?fromChain=${fromChain}&toChain=${toChain}&fromToken=${fromToken}&toToken=${toToken}&fromAmount=${fromAmount}`;
 
       try {
         document.getElementById("output").textContent = "Fetching quote...";
@@ -110,12 +116,14 @@
             tool: data.tool,
             bridge: data.estimate.tool,
             estimatedGas: data.estimate.gasCosts?.[0]?.estimate || "N/A",
-            toAmount: (data.estimate.toAmount / 1e18).toFixed(6) + " MATIC",
-            time: data.estimate.executionDuration + " sec",
+            toAmount: (data.estimate.toAmount / 1e18).toFixed(6),
+            time: data.estimate.executionDuration + " sec"
           };
           document.getElementById("output").textContent = JSON.stringify(result, null, 2);
+        } else if (data.message) {
+          document.getElementById("output").textContent = "Error: " + data.message;
         } else {
-          document.getElementById("output").textContent = "No quote found.";
+          document.getElementById("output").textContent = "No quote found for this route.";
         }
       } catch (err) {
         document.getElementById("output").textContent = "Error: " + err.message;
